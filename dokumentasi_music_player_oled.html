@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Player OLED — ESP32-C3 Supermini</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg:        #0d0f14;
+    --surface:   #141720;
+    --card:      #1a1f2e;
+    --border:    #252b3b;
+    --accent:    #7c6af7;
+    --accent2:   #4fd1c5;
+    --warn:      #f6ad55;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --oled-bg:   #000000;
+    --oled-px:   #ffffff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Space Grotesk', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── HERO ──────────────────────────────────── */
+  .hero {
+    background: linear-gradient(135deg, #0d0f14 0%, #12162a 50%, #0d1520 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 24px 48px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,106,247,.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-badge {
+    display: inline-block;
+    background: rgba(124,106,247,.12);
+    border: 1px solid rgba(124,106,247,.3);
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 700;
+    letter-spacing: -.02em;
+    background: linear-gradient(135deg, #e2e8f0 30%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+  .hero-sub {
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 480px;
+    margin: 0 auto 36px;
+  }
+  .hero-chips {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    justify-content: center;
+  }
+  .chip {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--text);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .chip-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot-purple { background: var(--accent); }
+  .dot-teal   { background: var(--accent2); }
+  .dot-orange { background: var(--warn); }
+
+  /* ── LAYOUT ─────────────────────────────────── */
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    letter-spacing: -.01em;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  p { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+
+  /* ── OLED SIMULATOR ──────────────────────────── */
+  .oled-wrap {
+    display: flex; justify-content: center;
+    margin: 32px 0;
+  }
+  .oled-bezel {
+    background: #1a1a1a;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 0 0 2px #2a2a2a, 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(124,106,247,.08);
+    position: relative;
+  }
+  .oled-screen {
+    width: 256px; height: 128px; /* 2× scale */
+    background: var(--oled-bg);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+    image-rendering: pixelated;
+  }
+  canvas#oledCanvas {
+    width: 256px; height: 128px;
+    display: block;
+    image-rendering: pixelated;
+  }
+  .oled-label {
+    text-align: center;
+    margin-top: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: .08em;
+  }
+
+  /* ── CARDS / GRIDS ──────────────────────────── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 640px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card-icon {
+    font-size: 22px;
+    margin-bottom: 10px;
+  }
+  .card h3 { font-size: 14px; margin-bottom: 6px; }
+  .card p { font-size: 13px; margin: 0; }
+
+  /* ── WIRING TABLE ───────────────────────────── */
+  .wiring-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  .wiring-table th {
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .wiring-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .wiring-table tr:last-child td { border-bottom: none; }
+  .wiring-table tr:hover td { background: rgba(255,255,255,.02); }
+  .pin-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: rgba(124,106,247,.12);
+    color: var(--accent);
+    border: 1px solid rgba(124,106,247,.25);
+    border-radius: 5px;
+    padding: 2px 8px;
+  }
+  .wire-color {
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .wire-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── CODE BLOCK ─────────────────────────────── */
+  .code-wrap {
+    background: #0a0c14;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 16px 0;
+  }
+  .code-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .code-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .copy-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: 'Space Grotesk', sans-serif;
+    transition: all .15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  pre {
+    padding: 20px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #a8b4d0;
+    max-height: 420px;
+  }
+  .kw  { color: #7c6af7; }
+  .ty  { color: #4fd1c5; }
+  .cm  { color: #4a5568; font-style: italic; }
+  .str { color: #68d391; }
+  .num { color: #f6ad55; }
+  .fn  { color: #90cdf4; }
+
+  /* ── LYRIC TABLE ────────────────────────────── */
+  .lyric-row {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .lyric-row:last-child { border-bottom: none; }
+  .lyric-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    width: 20px;
+    flex-shrink: 0;
+  }
+  .lyric-text { flex: 1; font-size: 14px; }
+  .lyric-dur {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent2);
+    background: rgba(79,209,197,.08);
+    border: 1px solid rgba(79,209,197,.2);
+    border-radius: 6px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+
+  /* ── FUNCTION DOCS ──────────────────────────── */
+  .fn-block {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .fn-header {
+    background: var(--surface);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .fn-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: #90cdf4;
+  }
+  .fn-type {
+    font-size: 11px;
+    background: rgba(124,106,247,.1);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .fn-body { padding: 14px 16px; }
+  .fn-body p { margin: 0; font-size: 13px; }
+
+  /* ── STEP LIST ──────────────────────────────── */
+  .steps { counter-reset: step; }
+  .step {
+    display: flex; gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .step:last-child { border-bottom: none; }
+  .step-num {
+    counter-increment: step;
+    width: 28px; height: 28px;
+    background: rgba(124,106,247,.15);
+    border: 1px solid rgba(124,106,247,.3);
+    border-radius: 50%;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-num::before { content: counter(step); }
+  .step-content h3 { margin-bottom: 4px; }
+  .step-content p { margin: 0; }
+
+  /* ── ALERT ──────────────────────────────────── */
+  .alert {
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex; gap: 12px; align-items: flex-start;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .alert-warn {
+    background: rgba(246,173,85,.06);
+    border: 1px solid rgba(246,173,85,.2);
+    color: #c9956a;
+  }
+  .alert-info {
+    background: rgba(79,209,197,.06);
+    border: 1px solid rgba(79,209,197,.2);
+    color: #4aada5;
+  }
+  .alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── FOOTER ─────────────────────────────────── */
+  footer {
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HERO ═══════════ -->
+<div class="hero">
+  <div class="hero-badge">Project Documentation</div>
+  <h1>Music Player OLED</h1>
+  <p class="hero-sub">Menampilkan lirik lagu berganti otomatis, animasi equalizer halus, dan ikon musik berkedip — semua berjalan non-blocking di ESP32-C3 Supermini.</p>
+  <div class="hero-chips">
+    <span class="chip"><span class="chip-dot dot-purple"></span>ESP32-C3 Supermini</span>
+    <span class="chip"><span class="chip-dot dot-teal"></span>SH1106 OLED 128×64</span>
+    <span class="chip"><span class="chip-dot dot-orange"></span>Adafruit GFX + SH110X</span>
+    <span class="chip"><span class="chip-dot dot-purple"></span>Arduino IDE</span>
+  </div>
+</div>
+
+<!-- ═══════════ SIMULATOR ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Live Preview</div>
+    <h2>Simulasi Tampilan OLED</h2>
+    <p>Preview interaktif menunjukkan tampilan sesungguhnya di layar OLED 128×64 piksel — lengkap dengan animasi equalizer dan pergantian lirik.</p>
+
+    <div class="oled-wrap">
+      <div class="oled-bezel">
+        <div class="oled-screen">
+          <canvas id="oledCanvas" width="128" height="64"></canvas>
+        </div>
+        <div class="oled-label">SH1106 · 128×64 · I2C 0x3C</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ HARDWARE ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Hardware</div>
+    <h2>Komponen yang Dibutuhkan</h2>
+
+    <div class="grid-3">
+      <div class="card">
+        <div class="card-icon">🔲</div>
+        <h3>ESP32-C3 Supermini</h3>
+        <p>Board utama. RISC-V 160MHz, WiFi & BT bawaan, 400KB SRAM.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📺</div>
+        <h3>OLED SH1106 128×64</h3>
+        <p>Layar monokrom I2C. Alamat default 0x3C. Tegangan 3.3V.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔌</div>
+        <h3>Kabel Jumper</h3>
+        <p>4 buah kabel female-to-female untuk koneksi VCC, GND, SDA, SCL.</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top:32px;">Skema Wiring</h2>
+    <div class="alert alert-warn">
+      <span class="alert-icon">⚠️</span>
+      <span>Pastikan menggunakan tegangan <strong>3.3V</strong>, bukan 5V. ESP32-C3 Supermini tidak toleran terhadap 5V pada pin I/O-nya.</span>
+    </div>
+
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table class="wiring-table">
+        <thead>
+          <tr>
+            <th>ESP32-C3 Supermini</th>
+            <th>OLED SH1106</th>
+            <th>Kabel</th>
+            <th>Keterangan</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="pin-badge">3.3V</span></td>
+            <td><span class="pin-badge">VCC</span></td>
+            <td><span class="wire-color"><span class="wire-dot" style="background:#e53e3e"></span>Merah</span></td>
+            <td>Daya 3.3V</td>
+          </tr>
+          <tr>
+            <td><span class="pin-badge">GND</span></td>
+            <td><span class="pin-badge">GND</span></td>
+            <td><span class="wire-color"><span class="wire-dot" style="background:#2d3748"></span>Hitam</span></td>
+            <td>Ground</td>
+          </tr>
+          <tr>
+            <td><span class="pin-badge">GPIO6</span></td>
+            <td><span class="pin-badge">SDA</span></td>
+            <td><span class="wire-color"><span class="wire-dot" style="background:#3182ce"></span>Biru</span></td>
+            <td>I2C Data</td>
+          </tr>
+          <tr>
+            <td><span class="pin-badge">GPIO7</span></td>
+            <td><span class="pin-badge">SCL</span></td>
+            <td><span class="wire-color"><span class="wire-dot" style="background:#d69e2e"></span>Kuning</span></td>
+            <td>I2C Clock</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ SETUP ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Persiapan</div>
+    <h2>Cara Upload ke ESP32-C3</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num"></div>
+        <div class="step-content">
+          <h3>Install Arduino IDE</h3>
+          <p>Download dari <strong>arduino.cc/en/software</strong>. Gunakan versi 2.x untuk pengalaman terbaik.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <div class="step-content">
+          <h3>Tambahkan Board ESP32</h3>
+          <p>Buka <strong>File → Preferences</strong>, tambahkan URL berikut ke "Additional Board Manager URLs":</p>
+          <div class="code-wrap" style="margin-top:8px;">
+            <pre style="padding:12px; max-height:none;">https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json</pre>
+          </div>
+          <p>Kemudian buka <strong>Tools → Board → Boards Manager</strong>, cari <code>esp32</code>, install paket dari Espressif.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <div class="step-content">
+          <h3>Install Library</h3>
+          <p>Buka <strong>Sketch → Include Library → Manage Libraries</strong>, lalu install:</p>
+          <div class="grid-2" style="margin-top:8px; gap:8px;">
+            <div class="card" style="padding:12px;">
+              <div class="fn-name" style="font-size:13px;">Adafruit SH110X</div>
+              <p style="margin-top:4px; font-size:12px;">Driver utama untuk OLED SH1106/SH1107. Install ini — GFX ikut otomatis.</p>
+            </div>
+            <div class="card" style="padding:12px;">
+              <div class="fn-name" style="font-size:13px;">Adafruit GFX Library</div>
+              <p style="margin-top:4px; font-size:12px;">Library grafis dasar untuk teks, garis, kotak. Biasanya terinstall otomatis.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <div class="step-content">
+          <h3>Pilih Board & Port</h3>
+          <p>Sambungkan ESP32-C3 via USB, lalu pilih:</p>
+          <div class="card" style="padding:12px; margin-top:8px;">
+            <p style="margin:0; font-size:13px;">
+              <strong>Tools → Board:</strong> <code>ESP32C3 Dev Module</code><br>
+              <strong>Tools → USB CDC On Boot:</strong> <code>Enabled</code><br>
+              <strong>Tools → Port:</strong> <code>COMx</code> atau <code>/dev/ttyUSB0</code>
+            </p>
+          </div>
+          <div class="alert alert-info" style="margin-top:8px;">
+            <span class="alert-icon">💡</span>
+            <span>Jika port tidak muncul, tekan tombol BOOT di board sambil colok USB, atau install driver CH340/CP2102.</span>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num"></div>
+        <div class="step-content">
+          <h3>Upload Kode</h3>
+          <p>Buka file <code>music_player_oled.ino</code>, klik tombol <strong>Upload (→)</strong>. Tunggu "Done uploading", OLED langsung menyala.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ LIRIK ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Konten</div>
+    <h2>Daftar Lirik & Durasi</h2>
+    <p>Setiap lirik ditampilkan selama durasi yang ditentukan, lalu berganti ke berikutnya dan mengulang dari awal secara terus-menerus.</p>
+
+    <div class="card" style="padding: 8px 20px;">
+      <div class="lyric-row">
+        <div class="lyric-num">1</div>
+        <div class="lyric-text">tapi semua yang<br><span style="color:var(--muted)">kau cinta akan pergi</span></div>
+        <div class="lyric-dur">5620 ms</div>
+      </div>
+      <div class="lyric-row">
+        <div class="lyric-num">2</div>
+        <div class="lyric-text">maka tunjukkan</div>
+        <div class="lyric-dur">2730 ms</div>
+      </div>
+      <div class="lyric-row">
+        <div class="lyric-num">3</div>
+        <div class="lyric-text">sebelum terlambat</div>
+        <div class="lyric-dur">4140 ms</div>
+      </div>
+      <div class="lyric-row">
+        <div class="lyric-num">4</div>
+        <div class="lyric-text">kita slalu pikir<br><span style="color:var(--muted)">kita punya waktu</span></div>
+        <div class="lyric-dur">5170 ms</div>
+      </div>
+      <div class="lyric-row">
+        <div class="lyric-num">5</div>
+        <div class="lyric-text">lalu kita pilih<br><span style="color:var(--muted)">untuk nanti dulu</span></div>
+        <div class="lyric-dur">5900 ms</div>
+      </div>
+    </div>
+
+    <p style="margin-top:12px;">Total satu siklus penuh: <strong style="color:var(--accent2);">23.560 ms (~23,5 detik)</strong></p>
+  </div>
+</section>
+
+<!-- ═══════════ FUNGSI ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Referensi Kode</div>
+    <h2>Dokumentasi Fungsi</h2>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">setup()</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Dijalankan sekali saat board dinyalakan. Menginisialisasi I2C, OLED, nilai awal equalizer (tinggi & kecepatan acak per batang), dan mencatat waktu mulai lirik pertama.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">loop()</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Loop utama yang berjalan terus-menerus. Memanggil keempat fungsi update dan gambar. Tidak menggunakan <code>delay()</code> — semua berbasis <code>millis()</code> agar semua animasi berjalan bersamaan tanpa saling memblokir.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">updateLirik(sekarang)</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Membandingkan waktu saat ini dengan waktu mulai lirik + durasi lirik. Jika sudah lewat, <code>indexLirik</code> dinaikkan (modulo total lirik agar looping). Waktu mulai baru dicatat.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">updateEqualizer(sekarang)</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Tiap batang punya <em>target tinggi</em> dan <em>tinggi saat ini</em>. Setiap iterasi, tinggi saat ini digeser mendekati target menggunakan interpolasi linear (lerp). Target baru dipilih secara acak pada interval berbeda-beda per batang, menghasilkan gerakan yang natural dan tidak bersamaan.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">updateIkon(sekarang)</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Toggle boolean <code>ikonTampil</code> setiap 500ms. Ikon musik di pojok kanan atas akan tampil/hilang bergantian, menciptakan efek kedip.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">gambarDisplay()</span>
+        <span class="fn-type">void</span>
+      </div>
+      <div class="fn-body">
+        <p>Dipanggil ~25x per detik (setiap 40ms). Membersihkan buffer, lalu menggambar semua elemen secara berurutan: judul → ikon → garis pemisah → lirik → equalizer. Terakhir, <code>display.display()</code> mengirim buffer ke layar sekaligus.</p>
+      </div>
+    </div>
+
+    <div class="fn-block">
+      <div class="fn-header">
+        <span class="fn-name">pusatkanTeks(teks)</span>
+        <span class="fn-type">int</span>
+      </div>
+      <div class="fn-body">
+        <p>Menghitung posisi X agar teks berada di tengah layar. Rumus: <code>(128 - panjang_teks × 6) / 2</code>. Font size 1 pada Adafruit GFX berukuran 6×8 piksel per karakter.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ KODE LENGKAP ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Source Code</div>
+    <h2>Kode Lengkap</h2>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <span class="code-title">music_player_oled.ino</span>
+        <button class="copy-btn" onclick="copyCode()">Salin Kode</button>
+      </div>
+      <pre id="mainCode"><span class="cm">// ============================================================
+//  Music Player OLED - ESP32-C3 Supermini
+//  Board   : ESP32-C3 Supermini
+//  Display : SH1106 128x64 I2C (alamat 0x3C)
+//  Library : Adafruit GFX + Adafruit SH110X
+// ============================================================</span>
+
+<span class="kw">#include</span> <span class="str">&lt;Wire.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;Adafruit_GFX.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;Adafruit_SH110X.h&gt;</span>
+
+<span class="cm">// ─── Konfigurasi Layar ───────────────────────────────────────</span>
+<span class="kw">#define</span> <span class="ty">SCREEN_WIDTH</span>  <span class="num">128</span>
+<span class="kw">#define</span> <span class="ty">SCREEN_HEIGHT</span> <span class="num">64</span>
+<span class="kw">#define</span> <span class="ty">OLED_ADDR</span>     <span class="num">0x3C</span>
+<span class="kw">#define</span> <span class="ty">OLED_RESET</span>    <span class="num">-1</span>
+<span class="kw">#define</span> <span class="ty">SDA_PIN</span> <span class="num">6</span>
+<span class="kw">#define</span> <span class="ty">SCL_PIN</span> <span class="num">7</span>
+
+<span class="ty">Adafruit_SH1106G</span> display(<span class="ty">SCREEN_WIDTH</span>, <span class="ty">SCREEN_HEIGHT</span>, &amp;Wire, <span class="ty">OLED_RESET</span>);
+
+<span class="cm">// ─── Struct Lirik ────────────────────────────────────────────</span>
+<span class="kw">struct</span> <span class="ty">Lyric</span> {
+  <span class="kw">const char</span>* line1;
+  <span class="kw">const char</span>* line2;
+  <span class="kw">unsigned long</span> durasi;
+};
+
+<span class="kw">const</span> <span class="ty">Lyric</span> lirik[] = {
+  { <span class="str">"tapi semua yang"</span>,   <span class="str">"kau cinta akan pergi"</span>, <span class="num">5620</span> },
+  { <span class="str">"maka tunjukkan"</span>,    <span class="str">""</span>,                      <span class="num">2730</span> },
+  { <span class="str">"sebelum terlambat"</span>, <span class="str">""</span>,                      <span class="num">4140</span> },
+  { <span class="str">"kita slalu pikir"</span>,  <span class="str">"kita punya waktu"</span>,      <span class="num">5170</span> },
+  { <span class="str">"lalu kita pilih"</span>,   <span class="str">"untuk nanti dulu"</span>,      <span class="num">5900</span> },
+};
+
+<span class="kw">const int</span> TOTAL_LIRIK = <span class="kw">sizeof</span>(lirik) / <span class="kw">sizeof</span>(lirik[<span class="num">0</span>]);
+<span class="kw">int</span> indexLirik = <span class="num">0</span>;
+<span class="kw">unsigned long</span> waktuGantiLirik = <span class="num">0</span>;
+
+<span class="cm">// ─── Equalizer ───────────────────────────────────────────────</span>
+<span class="kw">#define</span> <span class="ty">EQ_BATANG</span>     <span class="num">13</span>
+<span class="kw">#define</span> <span class="ty">EQ_LEBAR</span>       <span class="num">7</span>
+<span class="kw">#define</span> <span class="ty">EQ_GAP</span>         <span class="num">2</span>
+<span class="kw">#define</span> <span class="ty">EQ_Y_BAWAH</span>    <span class="num">63</span>
+<span class="kw">#define</span> <span class="ty">EQ_MAX_TINGGI</span> <span class="num">12</span>
+
+<span class="kw">float</span> eqTarget[<span class="ty">EQ_BATANG</span>];
+<span class="kw">float</span> eqSekarang[<span class="ty">EQ_BATANG</span>];
+<span class="kw">float</span> eqKecepatan[<span class="ty">EQ_BATANG</span>];
+<span class="kw">unsigned long</span> eqWaktuGanti[<span class="ty">EQ_BATANG</span>];
+
+<span class="kw">bool</span> ikonTampil = <span class="kw">true</span>;
+<span class="kw">unsigned long</span> waktuIkon = <span class="num">0</span>;
+<span class="kw">#define</span> <span class="ty">IKON_INTERVAL</span> <span class="num">500</span>
+
+<span class="kw">unsigned long</span> waktuUpdateDisplay = <span class="num">0</span>;
+<span class="kw">#define</span> <span class="ty">DISPLAY_INTERVAL</span> <span class="num">40</span>
+
+<span class="cm">// ─── Setup ───────────────────────────────────────────────────</span>
+<span class="kw">void</span> <span class="fn">setup</span>() {
+  Serial.<span class="fn">begin</span>(<span class="num">115200</span>);
+  Wire.<span class="fn">begin</span>(<span class="ty">SDA_PIN</span>, <span class="ty">SCL_PIN</span>);
+  <span class="kw">if</span> (!display.<span class="fn">begin</span>(<span class="ty">OLED_ADDR</span>, <span class="kw">true</span>)) {
+    <span class="kw">while</span> (<span class="kw">true</span>);
+  }
+  display.<span class="fn">clearDisplay</span>();
+  display.<span class="fn">display</span>();
+  <span class="fn">randomSeed</span>(<span class="fn">analogRead</span>(<span class="num">0</span>));
+  <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="ty">EQ_BATANG</span>; i++) {
+    eqSekarang[i]   = <span class="fn">random</span>(<span class="num">2</span>, <span class="ty">EQ_MAX_TINGGI</span>);
+    eqTarget[i]     = <span class="fn">random</span>(<span class="num">2</span>, <span class="ty">EQ_MAX_TINGGI</span>);
+    eqKecepatan[i]  = <span class="num">0.05f</span> + (<span class="fn">random</span>(<span class="num">10</span>) * <span class="num">0.02f</span>);
+    eqWaktuGanti[i] = <span class="fn">millis</span>() + <span class="fn">random</span>(<span class="num">300</span>, <span class="num">1200</span>);
+  }
+  waktuGantiLirik = <span class="fn">millis</span>();
+}
+
+<span class="cm">// ─── Loop ────────────────────────────────────────────────────</span>
+<span class="kw">void</span> <span class="fn">loop</span>() {
+  <span class="kw">unsigned long</span> sekarang = <span class="fn">millis</span>();
+  <span class="fn">updateLirik</span>(sekarang);
+  <span class="fn">updateEqualizer</span>(sekarang);
+  <span class="fn">updateIkon</span>(sekarang);
+  <span class="kw">if</span> (sekarang - waktuUpdateDisplay &gt;= <span class="ty">DISPLAY_INTERVAL</span>) {
+    waktuUpdateDisplay = sekarang;
+    <span class="fn">gambarDisplay</span>();
+  }
+}
+
+<span class="kw">void</span> <span class="fn">updateLirik</span>(<span class="kw">unsigned long</span> sekarang) {
+  <span class="kw">if</span> (sekarang - waktuGantiLirik &gt;= lirik[indexLirik].durasi) {
+    indexLirik = (indexLirik + <span class="num">1</span>) % TOTAL_LIRIK;
+    waktuGantiLirik = sekarang;
+  }
+}
+
+<span class="kw">void</span> <span class="fn">updateEqualizer</span>(<span class="kw">unsigned long</span> sekarang) {
+  <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="ty">EQ_BATANG</span>; i++) {
+    <span class="kw">if</span> (sekarang &gt;= eqWaktuGanti[i]) {
+      eqTarget[i]     = <span class="fn">random</span>(<span class="num">2</span>, <span class="ty">EQ_MAX_TINGGI</span> + <span class="num">1</span>);
+      eqWaktuGanti[i] = sekarang + <span class="fn">random</span>(<span class="num">200</span>, <span class="num">900</span>);
+    }
+    <span class="kw">float</span> selisih = eqTarget[i] - eqSekarang[i];
+    <span class="kw">if</span> (<span class="fn">abs</span>(selisih) &gt; <span class="num">0.1f</span>)
+      eqSekarang[i] += selisih * eqKecepatan[i];
+    <span class="kw">else</span>
+      eqSekarang[i] = eqTarget[i];
+  }
+}
+
+<span class="kw">void</span> <span class="fn">updateIkon</span>(<span class="kw">unsigned long</span> sekarang) {
+  <span class="kw">if</span> (sekarang - waktuIkon &gt;= <span class="ty">IKON_INTERVAL</span>) {
+    ikonTampil = !ikonTampil;
+    waktuIkon  = sekarang;
+  }
+}
+
+<span class="kw">void</span> <span class="fn">gambarDisplay</span>() {
+  display.<span class="fn">clearDisplay</span>();
+  <span class="fn">gambarJudul</span>();
+  <span class="fn">gambarIkonMusik</span>();
+  <span class="fn">gambarGarisPemisah</span>();
+  <span class="fn">gambarLirik</span>();
+  <span class="fn">gambarEqualizer</span>();
+  display.<span class="fn">display</span>();
+}
+
+<span class="kw">void</span> <span class="fn">gambarJudul</span>() {
+  display.<span class="fn">setTextSize</span>(<span class="num">1</span>);
+  display.<span class="fn">setCursor</span>(<span class="num">2</span>, <span class="num">0</span>);
+  display.<span class="fn">print</span>(<span class="str">"NOW PLAYING"</span>);
+}
+
+<span class="kw">void</span> <span class="fn">gambarIkonMusik</span>() {
+  <span class="kw">if</span> (!ikonTampil) <span class="kw">return</span>;
+  <span class="kw">int</span> x = <span class="num">116</span>, y = <span class="num">1</span>;
+  display.<span class="fn">drawLine</span>(x+<span class="num">4</span>, y, x+<span class="num">4</span>, y+<span class="num">6</span>, SH110X_WHITE);
+  display.<span class="fn">fillRect</span>(x, y+<span class="num">5</span>, <span class="num">4</span>, <span class="num">3</span>, SH110X_WHITE);
+  display.<span class="fn">drawLine</span>(x+<span class="num">4</span>, y, x+<span class="num">8</span>, y+<span class="num">2</span>, SH110X_WHITE);
+  display.<span class="fn">fillRect</span>(x+<span class="num">7</span>, y+<span class="num">6</span>, <span class="num">3</span>, <span class="num">3</span>, SH110X_WHITE);
+  display.<span class="fn">drawLine</span>(x+<span class="num">9</span>, y+<span class="num">2</span>, x+<span class="num">9</span>, y+<span class="num">6</span>, SH110X_WHITE);
+}
+
+<span class="kw">void</span> <span class="fn">gambarGarisPemisah</span>() {
+  display.<span class="fn">drawLine</span>(<span class="num">0</span>, <span class="num">10</span>, <span class="num">127</span>, <span class="num">10</span>, SH110X_WHITE);
+}
+
+<span class="kw">void</span> <span class="fn">gambarLirik</span>() {
+  <span class="kw">const char</span>* b1 = lirik[indexLirik].line1;
+  <span class="kw">const char</span>* b2 = lirik[indexLirik].line2;
+  display.<span class="fn">setTextSize</span>(<span class="num">1</span>);
+  <span class="kw">bool</span> ada2 = (b2 != <span class="kw">nullptr</span> &amp;&amp; b2[<span class="num">0</span>] != <span class="str">'\0'</span>);
+  <span class="kw">if</span> (ada2) {
+    display.<span class="fn">setCursor</span>(<span class="fn">pusatkanTeks</span>(b1), <span class="num">19</span>); display.<span class="fn">print</span>(b1);
+    display.<span class="fn">setCursor</span>(<span class="fn">pusatkanTeks</span>(b2), <span class="num">30</span>); display.<span class="fn">print</span>(b2);
+  } <span class="kw">else</span> {
+    display.<span class="fn">setCursor</span>(<span class="fn">pusatkanTeks</span>(b1), <span class="num">27</span>); display.<span class="fn">print</span>(b1);
+  }
+}
+
+<span class="kw">int</span> <span class="fn">pusatkanTeks</span>(<span class="kw">const char</span>* teks) {
+  <span class="kw">return</span> <span class="fn">max</span>((<span class="num">128</span> - (<span class="kw">int</span>)<span class="fn">strlen</span>(teks) * <span class="num">6</span>) / <span class="num">2</span>, <span class="num">0</span>);
+}
+
+<span class="kw">void</span> <span class="fn">gambarEqualizer</span>() {
+  <span class="kw">int</span> totalLebar = (<span class="ty">EQ_BATANG</span> * <span class="ty">EQ_LEBAR</span>) + ((<span class="ty">EQ_BATANG</span> - <span class="num">1</span>) * <span class="ty">EQ_GAP</span>);
+  <span class="kw">int</span> startX = (<span class="num">128</span> - totalLebar) / <span class="num">2</span>;
+  <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; <span class="ty">EQ_BATANG</span>; i++) {
+    <span class="kw">int</span> h = (<span class="kw">int</span>)eqSekarang[i]; <span class="kw">if</span> (h &lt; <span class="num">1</span>) h = <span class="num">1</span>;
+    <span class="kw">int</span> x = startX + i * (<span class="ty">EQ_LEBAR</span> + <span class="ty">EQ_GAP</span>);
+    display.<span class="fn">fillRect</span>(x, <span class="ty">EQ_Y_BAWAH</span> - h + <span class="num">1</span>, <span class="ty">EQ_LEBAR</span>, h, SH110X_WHITE);
+  }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ TROUBLESHOOT ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Bantuan</div>
+    <h2>Troubleshooting</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>🔇 OLED tidak menyala</h3>
+        <p>Cek wiring SDA/SCL. Pastikan pakai 3.3V bukan 5V. Coba jalankan I2C Scanner sketch untuk memastikan alamat 0x3C terdeteksi.</p>
+      </div>
+      <div class="card">
+        <h3>⚡ Upload gagal / port tidak muncul</h3>
+        <p>Tekan tombol BOOT di board, lalu colok USB. Atau hold BOOT, tekan RESET sekali, lepas BOOT. Install driver CH340 jika perlu.</p>
+      </div>
+      <div class="card">
+        <h3>📺 Layar putih / noise</h3>
+        <p>Library salah. Pastikan pakai <code>Adafruit_SH110X</code> bukan library lain. Objek harus <code>Adafruit_SH1106G</code> (bukan SH1107).</p>
+      </div>
+      <div class="card">
+        <h3>🐌 Animasi tersendat</h3>
+        <p>Normal jika ada kode lain yang menggunakan <code>delay()</code>. Pastikan tidak ada <code>delay()</code> besar di luar fungsi yang disediakan.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    Music Player OLED · ESP32-C3 Supermini · Adafruit SH110X<br>
+    <span style="color:#4a5568; font-size:12px; margin-top:6px; display:block;">Dibuat dengan Arduino IDE · Library: Adafruit GFX + Adafruit SH110X</span>
+  </div>
+</footer>
+
+<!-- ═══════════ SCRIPTS ═══════════ -->
+<script>
+// ─── Copy Button ─────────────────────────────────────────────
+function copyCode() {
+  const rawCode = `// ============================================================
+//  Music Player OLED - ESP32-C3 Supermini
+// ============================================================
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDR     0x3C
+#define OLED_RESET    -1
+#define SDA_PIN 6
+#define SCL_PIN 7
+
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+struct Lyric { const char* line1; const char* line2; unsigned long durasi; };
+const Lyric lirik[] = {
+  { "tapi semua yang",   "kau cinta akan pergi", 5620 },
+  { "maka tunjukkan",    "",                      2730 },
+  { "sebelum terlambat", "",                      4140 },
+  { "kita slalu pikir",  "kita punya waktu",      5170 },
+  { "lalu kita pilih",   "untuk nanti dulu",      5900 },
+};
+const int TOTAL_LIRIK = sizeof(lirik) / sizeof(lirik[0]);
+int indexLirik = 0;
+unsigned long waktuGantiLirik = 0;
+
+#define EQ_BATANG     13
+#define EQ_LEBAR       7
+#define EQ_GAP         2
+#define EQ_Y_BAWAH    63
+#define EQ_MAX_TINGGI 12
+float eqTarget[EQ_BATANG], eqSekarang[EQ_BATANG], eqKecepatan[EQ_BATANG];
+unsigned long eqWaktuGanti[EQ_BATANG];
+
+bool ikonTampil = true;
+unsigned long waktuIkon = 0;
+#define IKON_INTERVAL 500
+unsigned long waktuUpdateDisplay = 0;
+#define DISPLAY_INTERVAL 40
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(SDA_PIN, SCL_PIN);
+  if (!display.begin(OLED_ADDR, true)) { while (true); }
+  display.clearDisplay(); display.setTextColor(SH110X_WHITE); display.display();
+  randomSeed(analogRead(0));
+  for (int i = 0; i < EQ_BATANG; i++) {
+    eqSekarang[i]   = random(2, EQ_MAX_TINGGI);
+    eqTarget[i]     = random(2, EQ_MAX_TINGGI);
+    eqKecepatan[i]  = 0.05f + (random(10) * 0.02f);
+    eqWaktuGanti[i] = millis() + random(300, 1200);
+  }
+  waktuGantiLirik = millis();
+}
+
+void loop() {
+  unsigned long sekarang = millis();
+  updateLirik(sekarang); updateEqualizer(sekarang); updateIkon(sekarang);
+  if (sekarang - waktuUpdateDisplay >= DISPLAY_INTERVAL) {
+    waktuUpdateDisplay = sekarang; gambarDisplay();
+  }
+}
+
+void updateLirik(unsigned long sekarang) {
+  if (sekarang - waktuGantiLirik >= lirik[indexLirik].durasi) {
+    indexLirik = (indexLirik + 1) % TOTAL_LIRIK;
+    waktuGantiLirik = sekarang;
+  }
+}
+
+void updateEqualizer(unsigned long sekarang) {
+  for (int i = 0; i < EQ_BATANG; i++) {
+    if (sekarang >= eqWaktuGanti[i]) {
+      eqTarget[i] = random(2, EQ_MAX_TINGGI + 1);
+      eqWaktuGanti[i] = sekarang + random(200, 900);
+    }
+    float s = eqTarget[i] - eqSekarang[i];
+    if (abs(s) > 0.1f) eqSekarang[i] += s * eqKecepatan[i];
+    else eqSekarang[i] = eqTarget[i];
+  }
+}
+
+void updateIkon(unsigned long sekarang) {
+  if (sekarang - waktuIkon >= IKON_INTERVAL) { ikonTampil = !ikonTampil; waktuIkon = sekarang; }
+}
+
+void gambarDisplay() {
+  display.clearDisplay();
+  gambarJudul(); gambarIkonMusik(); gambarGarisPemisah(); gambarLirik(); gambarEqualizer();
+  display.display();
+}
+
+void gambarJudul() { display.setTextSize(1); display.setCursor(2, 0); display.print("NOW PLAYING"); }
+
+void gambarIkonMusik() {
+  if (!ikonTampil) return;
+  int x = 116, y = 1;
+  display.drawLine(x+4, y, x+4, y+6, SH110X_WHITE);
+  display.fillRect(x, y+5, 4, 3, SH110X_WHITE);
+  display.drawLine(x+4, y, x+8, y+2, SH110X_WHITE);
+  display.fillRect(x+7, y+6, 3, 3, SH110X_WHITE);
+  display.drawLine(x+9, y+2, x+9, y+6, SH110X_WHITE);
+}
+
+void gambarGarisPemisah() { display.drawLine(0, 10, 127, 10, SH110X_WHITE); }
+
+void gambarLirik() {
+  const char* b1 = lirik[indexLirik].line1;
+  const char* b2 = lirik[indexLirik].line2;
+  display.setTextSize(1);
+  bool ada2 = (b2 != nullptr && b2[0] != '\\0');
+  if (ada2) {
+    display.setCursor(pusatkanTeks(b1), 19); display.print(b1);
+    display.setCursor(pusatkanTeks(b2), 30); display.print(b2);
+  } else {
+    display.setCursor(pusatkanTeks(b1), 27); display.print(b1);
+  }
+}
+
+int pusatkanTeks(const char* teks) { return max((128 - (int)strlen(teks) * 6) / 2, 0); }
+
+void gambarEqualizer() {
+  int totalLebar = (EQ_BATANG * EQ_LEBAR) + ((EQ_BATANG - 1) * EQ_GAP);
+  int startX = (128 - totalLebar) / 2;
+  for (int i = 0; i < EQ_BATANG; i++) {
+    int h = (int)eqSekarang[i]; if (h < 1) h = 1;
+    display.fillRect(startX + i * (EQ_LEBAR + EQ_GAP), EQ_Y_BAWAH - h + 1, EQ_LEBAR, h, SH110X_WHITE);
+  }
+}`;
+  navigator.clipboard.writeText(rawCode).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = '✓ Tersalin!';
+    setTimeout(() => btn.textContent = 'Salin Kode', 2000);
+  });
+}
+
+// ─── OLED Simulator ──────────────────────────────────────────
+const canvas = document.getElementById('oledCanvas');
+const ctx = canvas.getContext('2d');
+
+// Scale: canvas 128x64, display 256x128 (CSS 2×)
+const W = 128, H = 64;
+
+const lyrics = [
+  { l1: "tapi semua yang",   l2: "kau cinta akan pergi", dur: 5620 },
+  { l1: "maka tunjukkan",    l2: "",                      dur: 2730 },
+  { l1: "sebelum terlambat", l2: "",                      dur: 4140 },
+  { l1: "kita slalu pikir",  l2: "kita punya waktu",      dur: 5170 },
+  { l1: "lalu kita pilih",   l2: "untuk nanti dulu",      dur: 5900 },
+];
+
+// Equalizer state (mirrors Arduino logic)
+const EQ_N = 13, EQ_W = 7, EQ_GAP = 2, EQ_MAX = 12;
+const eqCur   = Array.from({length: EQ_N}, () => 2 + Math.random() * EQ_MAX);
+const eqTgt   = Array.from({length: EQ_N}, () => 2 + Math.random() * EQ_MAX);
+const eqSpd   = Array.from({length: EQ_N}, () => 0.04 + Math.random() * 0.12);
+const eqNext  = Array.from({length: EQ_N}, () => performance.now() + 300 + Math.random() * 900);
+
+let lyricIdx   = 0;
+let lyricStart = performance.now();
+let iconOn     = true;
+let iconFlip   = performance.now();
+
+// Tiny 5×7 pixel font map (uppercase + space)
+const FONT = {
+  ' ': [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]],
+  'A': [[0,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,1,1,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'B': [[1,1,1,0,0],[1,0,0,1,0],[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'C': [[0,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'D': [[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'E': [[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0]],
+  'F': [[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0]],
+  'G': [[0,1,1,1,0],[1,0,0,0,0],[1,0,1,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'H': [[1,0,0,1,0],[1,0,0,1,0],[1,1,1,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'I': [[1,1,1,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'J': [[0,0,1,1,0],[0,0,0,1,0],[0,0,0,1,0],[0,0,0,1,0],[1,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'K': [[1,0,0,1,0],[1,0,1,0,0],[1,1,0,0,0],[1,0,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'L': [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0]],
+  'M': [[1,0,0,0,1],[1,1,0,1,1],[1,0,1,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,0,0,0,0]],
+  'N': [[1,0,0,1,0],[1,1,0,1,0],[1,0,1,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'O': [[0,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'P': [[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,1,1,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0]],
+  'Q': [[0,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,1,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'R': [[1,1,1,0,0],[1,0,0,1,0],[1,1,1,0,0],[1,0,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'S': [[0,1,1,1,0],[1,0,0,0,0],[0,1,1,0,0],[0,0,0,1,0],[0,0,0,1,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'T': [[1,1,1,1,1],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,0,0,0]],
+  'U': [[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'V': [[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,1,0,1,0],[0,1,0,1,0],[0,0,1,0,0],[0,0,0,0,0]],
+  'W': [[1,0,0,0,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,1,0,1],[1,1,0,1,1],[1,0,0,0,1],[0,0,0,0,0]],
+  'X': [[1,0,0,1,0],[1,0,0,1,0],[0,1,1,0,0],[0,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'Y': [[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,0,0,0]],
+  'Z': [[1,1,1,1,0],[0,0,0,1,0],[0,0,1,0,0],[0,1,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0]],
+  'a': [[0,0,0,0,0],[0,1,1,0,0],[0,0,0,1,0],[0,1,1,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'b': [[1,0,0,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'c': [[0,0,0,0,0],[0,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'd': [[0,0,0,1,0],[0,0,0,1,0],[0,1,1,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'e': [[0,0,0,0,0],[0,1,1,0,0],[1,0,0,1,0],[1,1,1,1,0],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'f': [[0,0,1,1,0],[0,1,0,0,0],[1,1,1,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,0,0,0,0]],
+  'g': [[0,0,0,0,0],[0,1,1,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'h': [[1,0,0,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'i': [[0,1,0,0,0],[0,0,0,0,0],[1,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'j': [[0,0,1,0,0],[0,0,0,0,0],[0,1,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'k': [[1,0,0,0,0],[1,0,1,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,0,1,0,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'l': [[1,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0],[1,1,1,0,0],[0,0,0,0,0]],
+  'm': [[0,0,0,0,0],[1,1,0,1,0],[1,0,1,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,0,0,0,0]],
+  'n': [[0,0,0,0,0],[1,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'o': [[0,0,0,0,0],[0,1,1,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'p': [[0,0,0,0,0],[1,1,1,0,0],[1,0,0,1,0],[1,1,1,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0]],
+  'q': [[0,0,0,0,0],[0,1,1,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,1,0],[0,0,0,1,0],[0,0,0,0,0]],
+  'r': [[0,0,0,0,0],[1,0,1,1,0],[1,1,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0]],
+  's': [[0,0,0,0,0],[0,1,1,1,0],[1,0,0,0,0],[0,1,1,0,0],[0,0,0,1,0],[1,1,1,0,0],[0,0,0,0,0]],
+  't': [[0,1,0,0,0],[1,1,1,0,0],[0,1,0,0,0],[0,1,0,0,0],[0,1,0,1,0],[0,0,1,0,0],[0,0,0,0,0]],
+  'u': [[0,0,0,0,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],
+  'v': [[0,0,0,0,0],[1,0,0,0,1],[1,0,0,0,1],[0,1,0,1,0],[0,1,0,1,0],[0,0,1,0,0],[0,0,0,0,0]],
+  'w': [[0,0,0,0,0],[1,0,0,0,1],[1,0,0,0,1],[1,0,1,0,1],[1,1,0,1,1],[1,0,0,0,1],[0,0,0,0,0]],
+  'x': [[0,0,0,0,0],[1,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0],[0,1,1,0,0],[1,0,0,1,0],[0,0,0,0,0]],
+  'y': [[0,0,0,0,0],[1,0,0,1,0],[1,0,0,1,0],[0,1,1,1,0],[0,0,0,1,0],[0,1,1,0,0],[0,0,0,0,0]],
+  'z': [[0,0,0,0,0],[1,1,1,1,0],[0,0,1,0,0],[0,1,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0]],
+};
+
+function drawChar(ch, px, py) {
+  const g = FONT[ch] || FONT[' '];
+  for (let row = 0; row < 7; row++) {
+    for (let col = 0; col < 5; col++) {
+      if (g[row][col]) {
+        ctx.fillRect(px + col, py + row, 1, 1);
+      }
+    }
+  }
+}
+
+function drawText(str, px, py) {
+  let cx = px;
+  for (const ch of str) {
+    drawChar(ch, cx, py);
+    cx += 6;
+  }
+}
+
+function textWidth(str) { return str.length * 6; }
+function centerX(str) { return Math.max(0, Math.floor((W - textWidth(str)) / 2)); }
+
+function drawOLED(now) {
+  // Black background
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#ffffff';
+
+  // ── Title ──
+  drawText('NOW PLAYING', 2, 0);
+
+  // ── Music icon (blinking) ──
+  if (iconOn) {
+    const x = 116, y = 1;
+    // vertical stem
+    for (let i = y; i <= y + 6; i++) ctx.fillRect(x + 4, i, 1, 1);
+    // note head
+    ctx.fillRect(x, y + 5, 4, 3);
+    // flag
+    for (let i = 0; i <= 4; i++) ctx.fillRect(x + 4 + i, y + Math.round(i * 0.5), 1, 1);
+    // second note
+    ctx.fillRect(x + 7, y + 6, 3, 3);
+    for (let i = y + 2; i <= y + 6; i++) ctx.fillRect(x + 9, i, 1, 1);
+  }
+
+  // ── Separator line ──
+  ctx.fillRect(0, 10, W, 1);
+
+  // ── Lyrics ──
+  const ly = lyrics[lyricIdx];
+  const has2 = ly.l2 && ly.l2.length > 0;
+  if (has2) {
+    drawText(ly.l1, centerX(ly.l1), 19);
+    drawText(ly.l2, centerX(ly.l2), 30);
+  } else {
+    drawText(ly.l1, centerX(ly.l1), 27);
+  }
+
+  // ── Equalizer ──
+  const totalW = EQ_N * EQ_W + (EQ_N - 1) * EQ_GAP;
+  const startX = Math.floor((W - totalW) / 2);
+  for (let i = 0; i < EQ_N; i++) {
+    const h = Math.max(1, Math.round(eqCur[i]));
+    const x = startX + i * (EQ_W + EQ_GAP);
+    const y = 63 - h + 1;
+    ctx.fillRect(x, y, EQ_W, h);
+  }
+}
+
+function animate(now) {
+  // Update lyric
+  const elapsed = now - lyricStart;
+  if (elapsed >= lyrics[lyricIdx].dur) {
+    lyricIdx = (lyricIdx + 1) % lyrics.length;
+    lyricStart = now;
+  }
+
+  // Update icon
+  if (now - iconFlip >= 500) { iconOn = !iconOn; iconFlip = now; }
+
+  // Update equalizer (lerp)
+  for (let i = 0; i < EQ_N; i++) {
+    if (now >= eqNext[i]) {
+      eqTgt[i] = 2 + Math.random() * EQ_MAX;
+      eqNext[i] = now + 200 + Math.random() * 700;
+    }
+    const diff = eqTgt[i] - eqCur[i];
+    if (Math.abs(diff) > 0.05) eqCur[i] += diff * eqSpd[i];
+    else eqCur[i] = eqTgt[i];
+  }
+
+  drawOLED(now);
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
